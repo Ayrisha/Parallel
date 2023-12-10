@@ -63,29 +63,6 @@ void initiateSystem(char *fileName)
     fclose(fp);
 }
 
-void computeAccelerations(int thread)
-{
-    int j;
-    accelerations[thread].x = 0;
-    accelerations[thread].y = 0;
-    for (j = 0; j < bodies; j++)
-    {
-        if (thread != j)
-        {
-            accelerations[thread] = addVectors(accelerations[thread], scaleVector(GravConstant * masses[j] / pow(mod(subtractVectors(positions[thread], positions[j])), 3), subtractVectors(positions[j], positions[thread])));
-        }
-    }
-}
-
-void computeVelocities(int thread)
-{
-   velocities[thread] = addVectors(velocities[thread], scaleVector(DT, accelerations[thread]));
-}
-
-void computePositions(int thread)
-{
-    positions[thread] = addVectors(positions[thread], scaleVector(DT,velocities[thread]));
-}
 
 vector minus(vector a){
     vector c = {-a.x, -a.y};
@@ -95,8 +72,6 @@ vector minus(vector a){
 
 void simulate()
 {
-    omp_set_num_threads(2);
-
     vector** vectorArray = (vector**)malloc(bodies * sizeof(vector*));
     vector c = {0.0, 0.0};
 
@@ -104,13 +79,14 @@ void simulate()
         vectorArray[i] = (vector*)malloc(bodies * sizeof(vector));
     }
 
+    #pragma omp parallel for num_threads(1) private(j)
     for (int i = 0; i < bodies; i++) {
         for (int j = 0; j < bodies; j++) {
             vectorArray[i][j] = c;
         }
     }
 
-    #pragma omp parallel for 
+    #pragma omp parallel for num_threads(1)
     for (int i = 0; i < bodies; i++)
     {
         accelerations[i].x = 0;
@@ -120,20 +96,19 @@ void simulate()
             if (i != j)
             {
                 if (vectorArray[i][j].x == 0.0 && vectorArray[i][j].y == 0.0){
-                    #pragma omp critical
                     accelerations[i] = addVectors(accelerations[i], scaleVector(GravConstant * masses[j] / pow(mod(subtractVectors(positions[i], positions[j])), 3), subtractVectors(positions[j], positions[i])));
                     #pragma omp critical
-                    vectorArray[i][j] = accelerations[i];
-                    #pragma omp critical
-                    vectorArray[j][i] = minus(accelerations[i]);
+                    {
+                        vectorArray[i][j] = accelerations[i];
+                        vectorArray[j][i] = minus(accelerations[i]);
+                    }
                 }
                 else{
-                    #pragma omp critical
-                    accelerations[i] = vectorArray[i][j];
+                    accelerations[i] = addVectors(accelerations[i], vectorArray[i][j]);
                 }
             }
         }
-        #pragma omp barier
+        #pragma omp barrier
         positions[i] = addVectors(positions[i], scaleVector(DT,velocities[i]));
         velocities[i] = addVectors(velocities[i], scaleVector(DT, accelerations[i]));
     }
